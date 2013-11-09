@@ -1,62 +1,27 @@
 #!/usr/bin/env python
 
+# scipy and sklearn is required
 # install BeautifulSoup by `pip install beautifulsoup4`
 from bs4 import BeautifulSoup
 import os
 import re
 import xml.sax.saxutils as saxutils
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.cluster import KMeans
 import pylab as pl
 import numpy as np
 from sklearn import metrics
-from sklearn.metrics import precision_recall_fscore_support
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
 from sklearn.decomposition import PCA
-from sklearn.decomposition import RandomizedPCA
-from random import randint
-from nltk import word_tokenize
-from nltk.stem import WordNetLemmatizer
-import nltk, nltk.data, nltk.tag
+import random
 from nltk.corpus import stopwords
-from nltk.corpus import wordnet as wn
-from difflib import get_close_matches as gcm
-from itertools import chain
-
-comparative_irregular = {
-        "worse": "bad",
-        "further": "far",
-        "farther": "far",
-        "better": "good",
-        "hinder": "hind",
-        "lesser": "less",
-        "less": "little",
-        "more": "many"
-        }
-
-superlative_irregular = {
-        "worst": "bad",
-        "farthest": "far",
-        "furthest": "far",
-        "best": "good",
-        "hindmost": "hind",
-        "least": "less",
-        "most": "many",
-        "eldest": "old"
-        }
-
-class LemmaTokenizer(object):
-    def __init__(self):
-        self.wnl = WordNetLemmatizer()
-    def __call__(self, doc):
-        return [self.wnl.lemmatize(t) for t in word_tokenize(doc)]
+import Stemmer #download and install from http://snowball.tartarus.org/wrappers/guide.html
+from mylib import Kmeans
 
 FILE_DIR = "./reuters21578/"
 TOPICS = [x.strip() for x in open('reuters21578/all-topics-strings.lc.txt').readlines()]
 stopwords_list = stopwords.words('english')
-tagger = nltk.data.load(nltk.tag._POS_TAGGER) #initiate pos_tag data
-wnl = WordNetLemmatizer()
+stemmer = Stemmer.Stemmer('english')
 
 def getText(article, articles_index, truth_arr):
     soup = BeautifulSoup(article, 'xml').find('REUTERS') # read as xml --> no missing node
@@ -79,71 +44,12 @@ def getText(article, articles_index, truth_arr):
         text = soup.find('BODY').getText()
     text = saxutils.unescape(text)
 
-    sentences = nltk.sent_tokenize(text)
-
-    iws = [] #important words
-    for sentence in sentences:
-        words = nltk.word_tokenize(sentence)
-        tokens = tagger.tag(words)
-        for item in tokens:
-            word = item[0]
-            wl = len(word)
-            pos_tag = item[1]
-            if word in stopwords_list or re.match(r'\W+', word): #remove stopword and punctuation
-                continue
-
-            #word lemmatize
-            if pos_tag == 'JJ': #adjective
-                iws.append(word)
-            elif pos_tag == 'JJR' or pos_tag == 'RBR': #comparative
-                try:
-                    iws.append(comparative_irregular[word])
-                except KeyError:
-                    if word[wl-3:wl] == 'ier':
-                        iws.append(word[0:wl-3]+'y')
-                    elif word[wl-2:wl] == 'er':
-                        iws.append(word[0:wl-2])
-                        # else donothing
-            elif pos_tag == 'JJS' or pos_tag == 'RBS': #superlative
-                try:
-                    iws.append(superlative_irregular[word])
-                except KeyError:
-                    if word[wl-4:wl] == 'iest':
-                        iws.append(word[0:wl-4] + 'y')
-                    if word[wl-3:wl] == 'est':
-                        iws.append(word[0:wl-3])
-                        #else donothing
-            elif pos_tag == 'NN': #noun
-                iws.append(word)
-            elif pos_tag == 'NNS': #noun in plural
-                iws.append(wnl.lemmatize(word, 'n'))
-            elif pos_tag == 'NNP': #proper noun
-                iws.append(word)
-            elif pos_tag == 'NNPS': #proper noun in plural
-                iws.append(wnl.lemmatize(word, 'n'))
-            elif pos_tag == 'RB': # adverb
-                possible_adjectives = [k.name for k in chain(*[j.pertainyms() for j in chain(*[i.lemmas for i in wn.synsets(word)])])]
-                if len(possible_adjectives) == 0: #for irregular adv like: correspondingly
-                    if word[wl-2:wl] == 'ly':
-                        iws.append(word[0:wl-2])
-                else:
-                    adj = gcm(word, possible_adjectives)
-                    if len(adj) == 0:
-                        if nltk.pos_tag([word])[0][1] == 'JJ':
-                            iws.append(word)
-                    else:
-                        iws.append(adj[0]) #fine the most similar word
-            elif pos_tag == 'SYM': #symbol
-                iws.append(word)
-            elif pos_tag in ['VB','VBD','VBG','VBN','VBP','VBZ']: #verb
-                iws.append(wnl.lemmatize(word, 'v'))
-            elif pos_tag == 'CC': #cardinal number
-                iws.append(word)
-            elif pos_tag == 'FW': #foreign word
-                iws.append(word)
-            else: #others type of pos_tag are skiped
-                continue #skip
-    return  ' '.join(iws)
+    # sentences = nltk.sent_tokenize(text)
+    #remove punctuation
+    words = re.findall(r'\w+', text.lower(), flags = re.UNICODE | re.LOCALE)
+    #stopword filter
+    iws = [x for x in words if x not in  stopwords.words('english')]
+    return  ' '.join(stemmer.stemWords(iws))
     # return text
 
 if __name__=='__main__':
@@ -156,7 +62,7 @@ if __name__=='__main__':
     articles_index=[]
     articles_true=[]
 
-    for file in filelist[]:
+    for file in filelist:
         fp = open(FILE_DIR + file)
         str_sgm = ''.join(fp.readlines())
         fp.close()
@@ -178,34 +84,34 @@ if __name__=='__main__':
     print()
 
     print("No of Cluster: %s" % true_k)
-    km = KMeans(n_clusters=true_k, init='k-means++', n_init=1, verbose=True)
-    km.fit(X)
-    # km_labels = km.labels_
-    # km_cluster_centers = km.cluster_centers_
-    # km_labels_unique = np.unique(km_labels)
+    metric="euclidean"
+    km = Kmeans.Kmeans(X, k=true_k, metric=metric, delta=.001, max_iter=1000, verbose=0)
+    km_cluster_centers=km.centers
+    km_labels=km.labels
+    km_distances=km.distances
     print()
 
     print("Evaluation:")
-    print("Homogeneity: %0.3f" % metrics.homogeneity_score(labels, km.labels_))
-    print("Completeness: %0.3f" % metrics.completeness_score(labels, km.labels_))
-    print("V-measure: %0.3f" % metrics.v_measure_score(labels, km.labels_))
-    print("Adjusted Rand-Index: %.3f" % metrics.adjusted_rand_score(labels, km.labels_))
+    print("Homogeneity: %0.3f" % metrics.homogeneity_score(labels, km_labels))
+    print("Completeness: %0.3f" % metrics.completeness_score(labels, km_labels))
+    print("V-measure: %0.3f" % metrics.v_measure_score(labels, km_labels))
+    print("Adjusted Rand-Index: %.3f" % metrics.adjusted_rand_score(labels, km_labels))
     print()
 
     ###############################################################################
     # Visualize the results on PCA-reduced data
     reduced_data = PCA(n_components=2).fit_transform(X)
-    km = KMeans(n_clusters=true_k, init='k-means++', n_init=1, verbose=False)
-    km.fit(reduced_data)
-    km_labels = km.labels_
-    km_cluster_centers = km.cluster_centers_
-    km_labels_unique = np.unique(km_labels)
+    km = Kmeans.Kmeans(reduced_data, k=true_k, metric=metric, delta=.001, max_iter=1000, verbose=0)
+    km_cluster_centers=km.centers
+    km_labels=km.labels
+    km_labels_unique=np.unique(km_labels)
+
 
     pl.figure(1)
     pl.clf()
     colors = []
     for i in range(true_k):
-        colors.append('#%06X' % randint(0, 0xFFFFFF))
+        colors.append('#%06X' % random.randint(0, 0xFFEFDB)) #not random to extreme bright color, hard to see
     for k, col in zip(range(true_k), colors):
         my_members = km_labels == k
         cluster_center = km_cluster_centers[k]
@@ -215,5 +121,3 @@ if __name__=='__main__':
     pl.xticks(())
     pl.yticks(())
     pl.show()
-    # rpca=RandomizedPCA(n_components=2)
-    # reduced_data = rpca.fit_transform(X)

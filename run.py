@@ -26,14 +26,18 @@ TOPICS = [x.strip() for x in open('reuters21578/all-topics-strings.lc.txt').read
 stopwords_list = stopwords.words('english')
 stemmer = Stemmer.Stemmer('english')
 METRIC="euclidean" #define metric name
+MAX_FEATURES=1000000
 conn = sqlite3.connect("mydb.db") # database to store clusters and articles information
 cursor = conn.cursor()
+# cursor.execute('PRAGMA temp_store = MEMORY;')
+cursor.execute('PRAGMA synchronous = OFF')
 
 '''Recreate New Database'''
 def createDB():
     print("recreate database...")
     conn = sqlite3.connect("mydb.db")
     cursor = conn.cursor()
+    cursor.execute("begin")
     try:
         cursor.execute('''DROP TABLE clusters''')
         cursor.execute('''CREATE TABLE clusters(id)''')
@@ -100,7 +104,7 @@ def getText(article, truth_arr):
 
     # commit article to database
     cursor.execute("INSERT INTO articles (id, author, dateline, topic, content) VALUES (?,?,?,?,?)", (article_id, author, dateline, topic, text))
-    conn.commit()
+    # conn.commit()
 
     #remove punctuation
     words = re.findall(r'\w+', text.lower(), flags = re.UNICODE | re.LOCALE)
@@ -119,14 +123,14 @@ def doProcessing():
     articles_true=[] #store true label of articles
     createDB() #recreate database
 
-    for file in filelist:
+    for file in filelist[0:5]:
         with open(FILE_DIR + file) as fp:
             str_sgm = ''.join(fp.readlines())
         articles += filter(lambda i: i.strip(), str_sgm.split('</REUTERS>'))
     print()
 
     print("Extracting features from the training dataset using a sparse vectorizer")
-    vectorizer = CountVectorizer(max_df=0.7, max_features=10000)
+    vectorizer = CountVectorizer(max_df=0.7, max_features=MAX_FEATURES)
     transformer = TfidfTransformer(use_idf=True, smooth_idf=True)
     train_data = [getText(x, articles_true) for x in articles]
     trainVectorizerArray = vectorizer.fit_transform(train_data).toarray()
@@ -142,8 +146,8 @@ def doProcessing():
     true_k=np.unique(labels).shape[0] # choose number of cluster as the number of cluster defined in dataset
     print()
 
-    # print("Performing dimensionality reduction using LSA")
-    # lsa = TruncatedSVD(100) #n_demensions
+    # print("Performing dimensionality reduction using LSA") # make kmeans run extremely fast
+    # lsa = TruncatedSVD(400) #n_demensions
     # X = lsa.fit_transform(X)
     # X = Normalizer(copy=False).fit_transform(X)
     # print()
@@ -154,18 +158,6 @@ def doProcessing():
     km_cluster_centers=km.centers
     km_labels=km.labels
     km_distances=km.distances
-
-    with open('X.dat', 'wb') as outx:
-        pickle.dump(X, outx, pickle.HIGHEST_PROTOCOL) # dump vectorized articles to file
-    with open('km_cluster_centers.dat', 'wb') as outcc: # dump cluster centers info to file
-        pickle.dump(sparse.csr_matrix(km_cluster_centers), outcc, pickle.HIGHEST_PROTOCOL)
-
-    cursor.executemany("INSERT INTO clusters values (?)", [(str(i),) for i in range(true_k)]) #populate table clusters
-    conn.commit()
-
-    for i in range(len(km_labels)): #update information: which cluster each article belong to
-        cursor.execute("UPDATE articles SET cluster_id=:cluster_id  WHERE id=:id", {'cluster_id':str(km_labels[i]), 'id':str(i+1)})
-        conn.commit()
     print()
 
     print("Evaluation:")
@@ -173,22 +165,20 @@ def doProcessing():
     print("Completeness: %0.3f" % metrics.completeness_score(labels, km_labels))
     print("V-measure: %0.3f" % metrics.v_measure_score(labels, km_labels))
     print("Adjusted Rand-Index: %.3f" % metrics.adjusted_rand_score(labels, km_labels))
-    print()
 
-    ###############################################################################
     # Visualize the results on PCA-reduced data
-    reduced_data = PCA(n_components=2).fit_transform(X.toarray())
+    reduced_data = PCA(n_components=2).fit_transform(X if not hasattr(X, 'toarray') else X.toarray())
     kmv = Kmeans.Kmeans(reduced_data, k=true_k, metric=METRIC, delta=.001, max_iter=1000, verbose=0)
     kmv_cluster_centers=kmv.centers
     kmv_labels=kmv.labels
     kmv_labels_unique=np.unique(kmv_labels)
-
 
     pl.figure(1)
     pl.clf()
     colors = []
     for i in range(true_k):
         colors.append('#%06X' % random.randint(0, 0xFFEFDB)) #not random to extreme bright color, hard to see
+    print()
     for k, col in zip(range(true_k), colors):
         my_members = kmv_labels == k
         cluster_center = kmv_cluster_centers[k]
@@ -200,6 +190,25 @@ def doProcessing():
     # pl.show()
     pl.savefig('kmeans.png')
     # ipdb.set_trace()
+
+    # storing to database
+    print("storing articles cluster to database")
+    with open('X.dat', 'wb') as outx:
+        pickle.dump(X, outx, pickle.HIGHEST_PROTOCOL) # dump vectorized articles to file
+    print("X")
+    with open('km_cluster_centers.dat', 'wb') as outcc: # dump cluster centers info to file
+        pickle.dump(sparse.csr_matrix(km_cluster_centers), outcc, pickle.HIGHEST_PROTOCOL)
+    print("cluster_centers")
+    cursor.executemany("INSERT INTO clusters values (?)", [(str(i),) for i in range(true_k)]) #populate table clusters
+    conn.commit()
+    print("clusters")
+
+    for i in range(len(km_labels)): #update information: which cluster each article belong to
+        cursor.execute("UPDATE articles SET cluster_id=:cluster_id  WHERE id=:id", {'cluster_id':str(km_labels[i]), 'id':str(i+1)})
+    conn.commit()
+    print("articles")
+    print()
+
     return X, km, vectorizer, transformer.idf_
 
 def printArticle(article): #tuple
@@ -226,7 +235,7 @@ if __name__=='__main__':
             if 'km' in locals(): km_centers = km.centers
             if 'vectorizer' or 'km_centers' or 'idf_' or 'X' not in locals():
                 with open("vocabulary.txt") as fp:
-                    vectorizer = CountVectorizer(max_df=0.7, max_features=10000, vocabulary=eval(fp.readline()))
+                    vectorizer = CountVectorizer(max_df=0.7, max_features=MAX_FEATURES, vocabulary=eval(fp.readline()))
                 idf_ = np.load('idf.dat')
                 with open('km_cluster_centers.dat', 'rb') as incc:
                     km_centers = pickle.load(incc)

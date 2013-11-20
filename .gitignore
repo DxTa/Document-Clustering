@@ -40,3 +40,9 @@ nosetests.xml
 ~*
 *_result.txt
 *_vector.txt
+X.dat
+idf.dat
+km_cluster_centers.dat
+kmeans.png
+mydb.db
+vocabulary.txt

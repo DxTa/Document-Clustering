@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import ipdb #debug tool
+# import ipdb #debug tool
 import os, re, sklearn, scipy, sqlite3, random  # scipy and sklearn is required
 from bs4 import BeautifulSoup # install BeautifulSoup by `pip install beautifulsoup4`
 import xml.sax.saxutils as saxutils
@@ -11,7 +11,6 @@ import numpy as np
 from sklearn import metrics # for measurement
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import Normalizer
-from sklearn.decomposition import PCA
 from nltk.corpus import stopwords
 import Stemmer #download and install from http://snowball.tartarus.org/wrappers/guide.html
 from mylib import Kmeans
@@ -19,6 +18,7 @@ from scipy.spatial.distance import cdist  # $scipy/spatial/distance.py
 from scipy.sparse import issparse  # $scipy/sparse/csr.py
 from scipy import sparse
 import cPickle as pickle
+# import memory_profiler
 
 # np.set_printoptions(threshold=np.nan)
 FILE_DIR = "./reuters21578/"
@@ -114,6 +114,7 @@ def getText(article, truth_arr):
     # return text
 
 '''Main processing, kmeans, visualization'''
+# @profile
 def doProcessing():
     # initializtion
     print("initiate..")
@@ -123,9 +124,10 @@ def doProcessing():
     articles_true=[] #store true label of articles
     createDB() #recreate database
 
-    for file in filelist[0:5]:
-        with open(FILE_DIR + file) as fp:
-            str_sgm = ''.join(fp.readlines())
+    for file in filelist:
+        fp =  open(FILE_DIR + file)
+        str_sgm = ''.join(fp.readlines())
+        fp.close()
         articles += filter(lambda i: i.strip(), str_sgm.split('</REUTERS>'))
     print()
 
@@ -136,9 +138,12 @@ def doProcessing():
     trainVectorizerArray = vectorizer.fit_transform(train_data).toarray()
     transformer.fit(trainVectorizerArray)
     X = transformer.transform(trainVectorizerArray)
+    del trainVectorizerArray
 
-    with open("vocabulary.txt","w") as fp: # write vacabulary to file
-        fp.write(str(vectorizer.vocabulary_))
+
+    fp =  open("vocabulary.txt","w") # write vacabulary to file
+    fp.write(str(vectorizer.vocabulary_))
+    fp.close()
     transformer.idf_.dump('idf.dat') # dump idf_ data to file
 
     print(len(vectorizer.get_feature_names()),len(articles)) #show all features, number of articles
@@ -166,8 +171,10 @@ def doProcessing():
     print("V-measure: %0.3f" % metrics.v_measure_score(labels, km_labels))
     print("Adjusted Rand-Index: %.3f" % metrics.adjusted_rand_score(labels, km_labels))
 
-    # Visualize the results on PCA-reduced data
-    reduced_data = PCA(n_components=2).fit_transform(X if not hasattr(X, 'toarray') else X.toarray())
+    # Visualize the results on TruncatedSVD-reduced data
+    print("Visualization")
+    pca = TruncatedSVD(2) #n_demensions
+    reduced_data = pca.fit_transform(X)
     kmv = Kmeans.Kmeans(reduced_data, k=true_k, metric=METRIC, delta=.001, max_iter=1000, verbose=0)
     kmv_cluster_centers=kmv.centers
     kmv_labels=kmv.labels
@@ -190,6 +197,7 @@ def doProcessing():
     # pl.show()
     pl.savefig('kmeans.png')
     # ipdb.set_trace()
+    print()
 
     # storing to database
     print("storing articles cluster to database")
